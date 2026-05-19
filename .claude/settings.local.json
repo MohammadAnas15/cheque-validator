@@ -7,7 +7,11 @@
       "Bash(uvicorn main:app --host 0.0.0.0 --port 8000 --reload)",
       "PowerShell(python --version)",
       "PowerShell(python -m uvicorn --version)",
-      "PowerShell(pip install -r \"e:\\\\Anas\\\\Projects\\\\cheque-validator\\\\requirements.txt\")"
+      "PowerShell(pip install -r \"e:\\\\Anas\\\\Projects\\\\cheque-validator\\\\requirements.txt\")",
+      "PowerShell(python -m uvicorn --version 2>&1)",
+      "PowerShell(python -c \"import uvicorn; print\\('uvicorn ready'\\)\" 2>&1)",
+      "PowerShell(python -c \"import uvicorn; print\\('ok'\\)\" 2>&1)",
+      "PowerShell(Start-Sleep -Seconds 8; \\(Invoke-WebRequest -Uri \"http://localhost:8000/\" -UseBasicParsing -TimeoutSec 5\\).StatusCode)"
     ]
   }
 }

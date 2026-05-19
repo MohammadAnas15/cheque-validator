@@ -1,6 +1,10 @@
 import re
+import ssl
 from io import BytesIO
 from pathlib import Path
+
+# Allow EasyOCR to download models behind corporate/self-signed proxies
+ssl._create_default_https_context = ssl._create_unverified_context
 
 import numpy as np
 from fastapi import FastAPI, File, HTTPException, UploadFile
@@ -111,6 +115,10 @@ BANK_KEYWORDS: dict[str, list[str]] = {
 ALLOWED_TYPES = {"image/jpeg", "image/png", "image/gif", "image/webp"}
 _NOISE = {"camscanner", "cs", "adobe", "scan", "scanned", "please do not write"}
 
+# MICR E13B font OCR misread corrections
+# Common substitutions: L/A→4, E/G→6, I/l→1, O/o→0, Z→2, S→5, B→8, T→7
+_MICR_FIX = str.maketrans("LAEGIlOoZSBT", "446611002587")
+
 
 # ---------------------------------------------------------------------------
 # Image helpers
@@ -171,10 +179,21 @@ def _region(results, x0: float, y0: float, x1: float, y1: float) -> list:
 
 def _near_label(results, keywords: list[str], *, right=True, below=False,
                 max_dx: float = 600, max_dy: float = 45) -> str | None:
-    """Return text found to the right of / below the first matching keyword box."""
+    """Return text found to the right of / below the first matching keyword box.
+    Also handles the case where label and value are in the same OCR text block.
+    """
     for i, (bbox, text, _) in enumerate(results):
-        if not any(kw in text.lower() for kw in keywords):
+        lower = text.lower()
+        if not any(kw in lower for kw in keywords):
             continue
+
+        # Case: label and value are in the same OCR block (e.g. "Pay MOHAMMAD ANAS")
+        for kw in keywords:
+            if kw in lower:
+                rest = text[lower.index(kw) + len(kw):].strip(" :")
+                if rest and not any(n in rest.lower() for n in _NOISE):
+                    return rest
+
         label_rx = max(p[0] for p in bbox)
         label_by = max(p[1] for p in bbox)
         _, label_cy = _bbox_center(bbox)
