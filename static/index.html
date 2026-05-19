@@ -14,25 +14,39 @@
       padding: 3rem 2rem;
       text-align: center;
       cursor: pointer;
-      transition: border-color 0.2s, background 0.2s;
+      transition: border-color .2s, background .2s;
       background: #fff;
     }
     #drop-zone.dragover { border-color: #0d6efd; background: #eef4ff; }
     #preview-img { max-height: 320px; object-fit: contain; border-radius: 8px; }
-    .badge-match { font-size: 1rem; }
-    .result-card { animation: fadeIn 0.3s ease; }
-    @keyframes fadeIn { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
-    .micr-text { font-family: monospace; word-break: break-all; }
+    .result-card { animation: fadeIn .3s ease; }
+    @keyframes fadeIn { from { opacity:0; transform:translateY(8px); } to { opacity:1; transform:none; } }
+    .micr-text { font-family: monospace; word-break: break-all; letter-spacing: .04em; }
+    .field-val { font-weight: 600; color: #212529; }
+    .field-val.empty { color: #adb5bd; font-weight: 400; font-style: italic; }
+    .section-header {
+      font-size: .72rem;
+      font-weight: 700;
+      letter-spacing: .08em;
+      text-transform: uppercase;
+      color: #6c757d;
+      margin-bottom: .5rem;
+    }
+    .info-row { display: flex; justify-content: space-between; align-items: baseline;
+                padding: .35rem 0; border-bottom: 1px solid #f0f0f0; }
+    .info-row:last-child { border-bottom: none; }
+    .info-label { font-size: .82rem; color: #6c757d; flex-shrink: 0; margin-right: .75rem; }
   </style>
 </head>
 <body>
-<div class="container py-5" style="max-width: 760px;">
+<div class="container py-5" style="max-width:820px;">
+
   <div class="text-center mb-4">
     <h1 class="fw-bold"><i class="bi bi-bank2 text-primary"></i> Cheque Validator</h1>
-    <p class="text-muted">Upload a Pakistani bank cheque image to verify the MICR code and bank logo match.</p>
+    <p class="text-muted">Upload a Pakistani bank cheque to extract and validate all MICR, OCR, and ICR fields.</p>
   </div>
 
-  <!-- Upload area -->
+  <!-- Upload -->
   <div class="card shadow-sm mb-4">
     <div class="card-body p-4">
       <div id="drop-zone" onclick="document.getElementById('file-input').click()">
@@ -58,7 +72,7 @@
   <!-- Loading -->
   <div id="loading" class="text-center d-none my-4">
     <div class="spinner-border text-primary" role="status"></div>
-    <p class="mt-2 text-muted">Analyzing with Claude vision…</p>
+    <p class="mt-2 text-muted">Extracting cheque data…</p>
   </div>
 
   <!-- Error -->
@@ -66,96 +80,126 @@
 
   <!-- Results -->
   <div id="results" class="d-none result-card">
+
     <!-- Not a cheque -->
     <div id="not-cheque-card" class="card border-warning shadow-sm d-none mb-4">
       <div class="card-body text-center py-4">
         <i class="bi bi-x-circle-fill text-warning fs-1"></i>
         <h4 class="mt-3">Not a Cheque</h4>
-        <p id="not-cheque-notes" class="text-muted mb-0"></p>
+        <p class="text-muted mb-0">No MICR line or bank identity detected in the image.</p>
       </div>
     </div>
 
     <!-- Is a cheque -->
     <div id="cheque-card" class="d-none">
-      <!-- Match banner -->
+
+      <!-- Validation banner -->
       <div id="match-banner" class="card mb-3 shadow-sm d-none">
-        <div class="card-body text-center py-3">
+        <div id="match-body" class="card-body text-center py-3">
           <span id="match-icon" class="fs-1"></span>
-          <h4 id="match-text" class="mt-2 mb-0"></h4>
+          <h4 id="match-text" class="mt-2 mb-1"></h4>
+          <div class="d-flex justify-content-center align-items-center gap-2">
+            <span class="text-muted small">Confidence:</span>
+            <span id="confidence-badge" class="badge"></span>
+          </div>
         </div>
       </div>
 
       <div class="row g-3">
-        <!-- MICR -->
-        <div class="col-12">
-          <div class="card shadow-sm h-100">
-            <div class="card-header fw-semibold"><i class="bi bi-upc-scan me-1"></i> MICR Line</div>
-            <div class="card-body">
-              <p id="micr-line" class="micr-text mb-0 text-dark fs-6"></p>
-            </div>
-          </div>
-        </div>
 
-        <!-- Bank code -->
-        <div class="col-md-6">
-          <div class="card shadow-sm h-100">
-            <div class="card-header fw-semibold"><i class="bi bi-hash me-1"></i> Bank Code (MICR)</div>
-            <div class="card-body">
-              <p id="bank-code" class="fs-4 fw-bold text-primary mb-1"></p>
-              <p id="bank-name-code" class="text-muted mb-0 small"></p>
-            </div>
-          </div>
-        </div>
-
-        <!-- Logo bank -->
-        <div class="col-md-6">
-          <div class="card shadow-sm h-100">
-            <div class="card-header fw-semibold"><i class="bi bi-image me-1"></i> Bank Logo (Visual)</div>
-            <div class="card-body">
-              <p id="logo-bank" class="fs-5 fw-semibold text-dark mb-0"></p>
-            </div>
-          </div>
-        </div>
-
-        <!-- Confidence & notes -->
+        <!-- MICR raw line -->
         <div class="col-12">
           <div class="card shadow-sm">
-            <div class="card-header fw-semibold"><i class="bi bi-info-circle me-1"></i> Details</div>
+            <div class="card-header fw-semibold"><i class="bi bi-upc-scan me-1"></i> MICR Line (raw)</div>
             <div class="card-body">
-              <div class="d-flex align-items-center gap-2 mb-2">
-                <span class="text-muted">Confidence:</span>
-                <span id="confidence-badge" class="badge fs-6"></span>
-              </div>
-              <p id="notes" class="text-muted mb-0 small"></p>
+              <p id="micr-raw" class="micr-text mb-0 text-dark"></p>
             </div>
           </div>
         </div>
-      </div>
-    </div>
-  </div>
+
+        <!-- MICR parsed fields -->
+        <div class="col-md-6">
+          <div class="card shadow-sm h-100">
+            <div class="card-header fw-semibold"><i class="bi bi-cpu me-1"></i> MICR Fields</div>
+            <div class="card-body">
+              <div class="section-header">Magnetic Ink Character Recognition</div>
+              <div class="info-row"><span class="info-label">Cheque No.</span><span id="m-cheque-no" class="field-val"></span></div>
+              <div class="info-row"><span class="info-label">Bank Code</span><span id="m-bank-code" class="field-val"></span></div>
+              <div class="info-row"><span class="info-label">Bank Name</span><span id="m-bank-name" class="field-val"></span></div>
+              <div class="info-row"><span class="info-label">Branch Code</span><span id="m-branch" class="field-val"></span></div>
+              <div class="info-row"><span class="info-label">Account No.</span><span id="m-account" class="field-val"></span></div>
+              <div class="info-row"><span class="info-label">Amount</span><span id="m-amount" class="field-val"></span></div>
+            </div>
+          </div>
+        </div>
+
+        <!-- OCR + ICR fields -->
+        <div class="col-md-6">
+          <div class="card shadow-sm h-100">
+            <div class="card-header fw-semibold"><i class="bi bi-file-text me-1"></i> OCR Fields <small class="text-muted fw-normal">(printed)</small></div>
+            <div class="card-body">
+              <div class="section-header">Computer-Written</div>
+              <div class="info-row"><span class="info-label">Cheque No.</span><span id="o-cheque-no" class="field-val"></span></div>
+              <div class="info-row"><span class="info-label">Date</span><span id="o-date" class="field-val"></span></div>
+              <div class="info-row"><span class="info-label">Account No.</span><span id="o-account" class="field-val"></span></div>
+              <div class="info-row"><span class="info-label">Account Title</span><span id="o-title" class="field-val"></span></div>
+            </div>
+          </div>
+        </div>
+
+        <!-- ICR fields -->
+        <div class="col-12">
+          <div class="card shadow-sm">
+            <div class="card-header fw-semibold"><i class="bi bi-pencil me-1"></i> ICR Fields <small class="text-muted fw-normal">(handwritten)</small></div>
+            <div class="card-body">
+              <div class="section-header">Hand-Written</div>
+              <div class="row g-2">
+                <div class="col-sm-6">
+                  <div class="info-row"><span class="info-label">Payee</span><span id="i-payee" class="field-val"></span></div>
+                  <div class="info-row"><span class="info-label">Date</span><span id="i-date" class="field-val"></span></div>
+                </div>
+                <div class="col-sm-6">
+                  <div class="info-row"><span class="info-label">Amount (figures)</span><span id="i-amount" class="field-val"></span></div>
+                  <div class="info-row"><span class="info-label">Amount (words)</span><span id="i-words" class="field-val"></span></div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Bank logo detection -->
+        <div class="col-12">
+          <div class="card shadow-sm">
+            <div class="card-header fw-semibold"><i class="bi bi-image me-1"></i> Bank Detected from Logo / Header</div>
+            <div class="card-body">
+              <p id="logo-bank" class="fs-5 fw-semibold mb-0 text-dark"></p>
+            </div>
+          </div>
+        </div>
+
+      </div><!-- /row -->
+    </div><!-- /cheque-card -->
+  </div><!-- /results -->
 </div>
 
 <script>
-  const dropZone = document.getElementById('drop-zone');
-  const fileInput = document.getElementById('file-input');
-  const previewWrap = document.getElementById('preview-wrap');
+  const dropZone   = document.getElementById('drop-zone');
+  const fileInput  = document.getElementById('file-input');
+  const previewWrap= document.getElementById('preview-wrap');
   const previewImg = document.getElementById('preview-img');
   const analyzeBtn = document.getElementById('analyze-btn');
-  const resetBtn = document.getElementById('reset-btn');
-  const loading = document.getElementById('loading');
-  const errorBox = document.getElementById('error-box');
-  const results = document.getElementById('results');
+  const resetBtn   = document.getElementById('reset-btn');
+  const loading    = document.getElementById('loading');
+  const errorBox   = document.getElementById('error-box');
+  const results    = document.getElementById('results');
   let selectedFile = null;
 
   dropZone.addEventListener('dragover', e => { e.preventDefault(); dropZone.classList.add('dragover'); });
   dropZone.addEventListener('dragleave', () => dropZone.classList.remove('dragover'));
   dropZone.addEventListener('drop', e => {
-    e.preventDefault();
-    dropZone.classList.remove('dragover');
-    const f = e.dataTransfer.files[0];
-    if (f) setFile(f);
+    e.preventDefault(); dropZone.classList.remove('dragover');
+    const f = e.dataTransfer.files[0]; if (f) setFile(f);
   });
-
   fileInput.addEventListener('change', () => { if (fileInput.files[0]) setFile(fileInput.files[0]); });
 
   function setFile(f) {
@@ -171,10 +215,8 @@
   }
 
   resetBtn.addEventListener('click', () => {
-    selectedFile = null;
-    fileInput.value = '';
-    previewWrap.classList.add('d-none');
-    previewImg.src = '';
+    selectedFile = null; fileInput.value = '';
+    previewWrap.classList.add('d-none'); previewImg.src = '';
     hideResults();
   });
 
@@ -184,18 +226,15 @@
     loading.classList.remove('d-none');
     analyzeBtn.disabled = true;
 
-    const formData = new FormData();
-    formData.append('file', selectedFile);
+    const form = new FormData();
+    form.append('file', selectedFile);
 
     try {
-      const res = await fetch('/api/analyze', { method: 'POST', body: formData });
+      const res  = await fetch('/api/analyze', { method: 'POST', body: form });
       const data = await res.json();
-      if (!res.ok) {
-        showError(data.detail || `Error ${res.status}`);
-        return;
-      }
+      if (!res.ok) { showError(data.detail || `Error ${res.status}`); return; }
       renderResults(data);
-    } catch (err) {
+    } catch {
       showError('Network error — is the server running?');
     } finally {
       loading.classList.add('d-none');
@@ -208,55 +247,80 @@
     errorBox.classList.remove('d-none');
   }
 
+  function val(id, v, fallback = '—') {
+    const el = document.getElementById(id);
+    const text = v || fallback;
+    el.textContent = text;
+    el.className = 'field-val' + (v ? '' : ' empty');
+  }
+
   function renderResults(d) {
     results.classList.remove('d-none');
-    const notCheque = document.getElementById('not-cheque-card');
+    const notCheque  = document.getElementById('not-cheque-card');
     const chequeCard = document.getElementById('cheque-card');
 
     if (!d.is_cheque) {
       notCheque.classList.remove('d-none');
       chequeCard.classList.add('d-none');
-      document.getElementById('not-cheque-notes').textContent = d.notes || '';
       return;
     }
 
     notCheque.classList.add('d-none');
     chequeCard.classList.remove('d-none');
 
-    // Match banner
-    const matchBanner = document.getElementById('match-banner');
-    const matchIcon = document.getElementById('match-icon');
-    const matchText = document.getElementById('match-text');
+    // Validation banner
+    const banner = document.getElementById('match-banner');
+    const body   = document.getElementById('match-body');
     if (d.is_match !== null && d.is_match !== undefined) {
-      matchBanner.classList.remove('d-none');
+      banner.classList.remove('d-none');
       if (d.is_match) {
-        matchBanner.querySelector('.card-body').className = 'card-body text-center py-3 bg-success-subtle';
-        matchIcon.textContent = '';
-        matchText.textContent = 'Bank code and logo match';
-        matchText.className = 'mt-2 mb-0 text-success fw-bold';
+        body.className = 'card-body text-center py-3 bg-success-subtle';
+        document.getElementById('match-icon').textContent = '✅';
+        document.getElementById('match-text').textContent = 'Bank code and logo match';
+        document.getElementById('match-text').className = 'mt-2 mb-1 text-success fw-bold';
       } else {
-        matchBanner.querySelector('.card-body').className = 'card-body text-center py-3 bg-danger-subtle';
-        matchIcon.textContent = '';
-        matchText.textContent = 'Mismatch — bank code and logo differ';
-        matchText.className = 'mt-2 mb-0 text-danger fw-bold';
+        body.className = 'card-body text-center py-3 bg-danger-subtle';
+        document.getElementById('match-icon').textContent = '❌';
+        document.getElementById('match-text').textContent = 'Mismatch — bank code and logo differ';
+        document.getElementById('match-text').className = 'mt-2 mb-1 text-danger fw-bold';
       }
     } else {
-      matchBanner.classList.add('d-none');
+      banner.classList.add('d-none');
     }
 
-    document.getElementById('micr-line').textContent = d.micr_line || '(not readable)';
-    document.getElementById('bank-code').textContent = d.bank_code || '—';
-    document.getElementById('bank-name-code').textContent = d.bank_name_from_code || '';
-    document.getElementById('logo-bank').textContent = d.logo_bank || '(not identified)';
+    // Confidence badge
+    const conf = d.confidence || 'low';
+    const cb = document.getElementById('confidence-badge');
+    cb.textContent = conf.charAt(0).toUpperCase() + conf.slice(1) + ' confidence';
+    cb.className = 'badge ' + ({high:'bg-success', medium:'bg-warning text-dark', low:'bg-danger'}[conf] || 'bg-secondary');
 
-    const conf = d.confidence || 'unknown';
-    const confBadge = document.getElementById('confidence-badge');
-    confBadge.textContent = conf;
-    confBadge.className = 'badge fs-6 ' + ({
-      high: 'bg-success', medium: 'bg-warning text-dark', low: 'bg-danger'
-    }[conf] || 'bg-secondary');
+    // MICR raw
+    document.getElementById('micr-raw').textContent = d.micr_raw || '(not readable)';
 
-    document.getElementById('notes').textContent = d.notes || '';
+    // MICR fields
+    val('m-cheque-no', d.micr_cheque_number);
+    val('m-bank-code', d.micr_issuer_bank);
+    val('m-bank-name', d.micr_issuer_bank_name);
+    val('m-branch',    d.micr_issuer_branch);
+    val('m-account',   d.micr_issuer_account_number);
+    val('m-amount',    d.micr_amount);
+
+    // OCR fields
+    val('o-cheque-no', d.ocr_cheque_number);
+    val('o-date',      d.ocr_cheque_date);
+    val('o-account',   d.ocr_issuer_account_number);
+    val('o-title',     d.ocr_issuer_account_title);
+
+    // ICR fields
+    val('i-payee',  d.icr_payee_title);
+    val('i-date',   d.icr_cheque_date);
+    val('i-amount', d.icr_amount);
+    val('i-words',  d.icr_amount_words);
+
+    // Logo bank
+    const lb = document.getElementById('logo-bank');
+    lb.textContent = d.logo_bank || '(not identified)';
+    lb.className = d.logo_bank ? 'fs-5 fw-semibold mb-0 text-dark' : 'fs-5 mb-0 text-muted fst-italic';
   }
 </script>
 </body>

@@ -13,65 +13,108 @@ app = FastAPI(title="Pakistani Bank Cheque Validator")
 
 _reader = easyocr.Reader(["en"], gpu=False, verbose=False)
 
+# 3-digit NIFT bank codes sourced from Banks.txt
 PAKISTANI_BANKS: dict[str, str] = {
-    "0010": "National Bank of Pakistan (NBP)",
-    "0020": "State Bank of Pakistan (SBP)",
-    "0315": "Bank Alfalah",
-    "0340": "Habib Bank Limited (HBL)",
-    "0341": "Habib Bank Limited (HBL)",
-    "0350": "Soneri Bank",
-    "0360": "United Bank Limited (UBL)",
-    "0380": "Standard Chartered Pakistan",
-    "0450": "Allied Bank Limited (ABL)",
-    "0500": "Bank of Khyber",
-    "0550": "Faysal Bank",
-    "0570": "JS Bank",
-    "0620": "Citibank Pakistan",
-    "0630": "MCB Bank Limited",
-    "0650": "Habib Metropolitan Bank",
-    "0700": "Dubai Islamic Bank Pakistan",
-    "0706": "Meezan Bank",
-    "0750": "Bank Al Habib",
-    "0760": "Al Baraka Bank Pakistan",
-    "0830": "Silk Bank",
-    "0870": "FINCA Microfinance Bank",
-    "0890": "Askari Bank",
-    "0920": "National Bank of Pakistan (NBP)",
-    "0960": "Bank of Punjab (BoP)",
-    "0990": "SME Bank",
+    "001": "STATE BANK OF PAK.",
+    "010": "ZARAI TARAQIATI BANK",
+    "013": "DUBAI ISLAMIC BANK",
+    "014": "ALLIED BANK LTD",
+    "017": "ASKARI BANK LTD",
+    "018": "JS BANK LTD",
+    "021": "BANK ISLAMI PAK.",
+    "023": "BANK AL-HABIB LTD",
+    "028": "SAMBA BANK LTD",
+    "031": "ALBARAKA BANK LTD",
+    "037": "BANK OF CHINA",
+    "038": "STD. CHARTERED BANK",
+    "041": "TELENOR MF BANK",
+    "042": "DEUTSCHE BANK AG PAKISTAN",
+    "043": "SINDH BANK LTD",
+    "046": "CITI BANK NA",
+    "047": "FIRST WOMEN BANK LTD",
+    "053": "BANK AL-FALAH LTD",
+    "054": "HABIB BANK LTD",
+    "058": "INDUSTRIAL DEVELOPMENT BANK",
+    "060": "FAYSAL BANK LTD",
+    "061": "BANK OF KHYBER",
+    "062": "MCB BANK LTD",
+    "063": "MCB ISLAMIC BANK LTD",
+    "064": "HABIB METRO BANK LTD",
+    "066": "SILK BANK LTD",
+    "068": "SME BANK LTD",
+    "070": "NATIONAL BANK OF PAK",
+    "081": "BANK MAKRAMAH LTD",
+    "083": "BANK OF PUNJAB",
+    "085": "SONERI BANK LTD",
+    "086": "UNITED BANK LTD",
+    "088": "I&C BANK OF CHINA",
+    "089": "MEEZAN BANK LTD",
+    "090": "CDNS-NAT. SAVING ORG",
+    "099": "MUSHRIK BANK",
+    "101": "ADVANS MF BANK LTD",
+    "102": "APNA MF BANK",
+    "103": "FINCA MF BANK",
+    "104": "HBL MF BANK LTD",
+    "105": "KHUSHHALI MF BANK LTD",
+    "106": "NRSP MF BANK",
+    "107": "MOBILINK MF BANK",
+    "108": "U MF BANK LTD",
 }
 
 BANK_KEYWORDS: dict[str, list[str]] = {
-    "National Bank of Pakistan (NBP)": ["national bank", "nbp"],
-    "State Bank of Pakistan (SBP)": ["state bank", "sbp"],
-    "Bank Alfalah": ["alfalah"],
-    "Habib Bank Limited (HBL)": ["habib bank", "hbl"],
-    "Soneri Bank": ["soneri"],
-    "United Bank Limited (UBL)": ["united bank", "ubl"],
-    "Standard Chartered Pakistan": ["standard chartered", "stanchart", "scb"],
-    "Allied Bank Limited (ABL)": ["allied bank", "abl"],
-    "Bank of Khyber": ["bank of khyber", "bok"],
-    "Faysal Bank": ["faysal"],
-    "JS Bank": ["js bank", "jsbl"],
-    "Citibank Pakistan": ["citibank", "citi"],
-    "MCB Bank Limited": ["mcb"],
-    "Habib Metropolitan Bank": ["habib metro", "habibmetro", "hmb", "metropolitan"],
-    "Dubai Islamic Bank Pakistan": ["dubai islamic", "dib"],
-    "Meezan Bank": ["meezan"],
-    "Bank Al Habib": ["bank al habib", "bahl"],
-    "Al Baraka Bank Pakistan": ["al baraka", "baraka", "albaraka"],
-    "Silk Bank": ["silk bank", "silkbank"],
-    "FINCA Microfinance Bank": ["finca"],
-    "Askari Bank": ["askari"],
-    "Bank of Punjab (BoP)": ["bank of punjab", "bop"],
-    "SME Bank": ["sme bank"],
+    "STATE BANK OF PAK.":         ["state bank", "sbp"],
+    "ZARAI TARAQIATI BANK":       ["zarai taraqiati", "ztbl"],
+    "DUBAI ISLAMIC BANK":         ["dubai islamic", "dib"],
+    "ALLIED BANK LTD":            ["allied bank", "abl"],
+    "ASKARI BANK LTD":            ["askari"],
+    "JS BANK LTD":                ["js bank", "jsbl"],
+    "BANK ISLAMI PAK.":           ["bank islami"],
+    "BANK AL-HABIB LTD":          ["bank al-habib", "bank al habib", "bahl"],
+    "SAMBA BANK LTD":             ["samba"],
+    "ALBARAKA BANK LTD":          ["albaraka", "al baraka"],
+    "BANK OF CHINA":              ["bank of china"],
+    "STD. CHARTERED BANK":        ["standard chartered", "stanchart", "std. chartered"],
+    "TELENOR MF BANK":            ["telenor"],
+    "DEUTSCHE BANK AG PAKISTAN":  ["deutsche bank"],
+    "SINDH BANK LTD":             ["sindh bank"],
+    "CITI BANK NA":               ["citibank", "citi bank"],
+    "FIRST WOMEN BANK LTD":       ["first women bank"],
+    "BANK AL-FALAH LTD":          ["alfalah", "al falah", "bank alfalah"],
+    "HABIB BANK LTD":             ["habib bank", "hbl"],
+    "INDUSTRIAL DEVELOPMENT BANK":["industrial development bank", "idbp"],
+    "FAYSAL BANK LTD":            ["faysal"],
+    "BANK OF KHYBER":             ["bank of khyber", "bok"],
+    "MCB BANK LTD":               ["mcb bank", "muslim commercial", "mcb"],
+    "MCB ISLAMIC BANK LTD":       ["mcb islamic"],
+    "HABIB METRO BANK LTD":       ["habib metro", "habibmetro", "hmb"],
+    "SILK BANK LTD":              ["silk bank", "silkbank"],
+    "SME BANK LTD":               ["sme bank"],
+    "NATIONAL BANK OF PAK":       ["national bank", "nbp"],
+    "BANK MAKRAMAH LTD":          ["bank makramah"],
+    "BANK OF PUNJAB":             ["bank of punjab", "bop"],
+    "SONERI BANK LTD":            ["soneri"],
+    "UNITED BANK LTD":            ["united bank", "ubl"],
+    "I&C BANK OF CHINA":          ["i&c bank", "icbc", "industrial commercial bank"],
+    "MEEZAN BANK LTD":            ["meezan"],
+    "CDNS-NAT. SAVING ORG":       ["cdns", "national saving"],
+    "MUSHRIK BANK":               ["mushrik"],
+    "ADVANS MF BANK LTD":         ["advans"],
+    "APNA MF BANK":               ["apna"],
+    "FINCA MF BANK":              ["finca"],
+    "HBL MF BANK LTD":            ["hbl microfinance", "hbl mf"],
+    "KHUSHHALI MF BANK LTD":      ["khushhali"],
+    "NRSP MF BANK":               ["nrsp"],
+    "MOBILINK MF BANK":           ["mobilink"],
+    "U MF BANK LTD":              ["u microfinance", "u mf"],
 }
 
 ALLOWED_TYPES = {"image/jpeg", "image/png", "image/gif", "image/webp"}
-
-# Noise words that should never be mistaken for MICR content
 _NOISE = {"camscanner", "cs", "adobe", "scan", "scanned", "please do not write"}
 
+
+# ---------------------------------------------------------------------------
+# Image helpers
+# ---------------------------------------------------------------------------
 
 def _enhance(img: Image.Image) -> np.ndarray:
     gray = img.convert("L")
@@ -81,7 +124,6 @@ def _enhance(img: Image.Image) -> np.ndarray:
 
 
 def _ocr_with_boxes(img: Image.Image):
-    """Return list of (bbox, text, confidence) for the image."""
     return _reader.readtext(_enhance(img), detail=1, paragraph=False)
 
 
@@ -90,10 +132,6 @@ def _total_chars(results) -> int:
 
 
 def _best_rotation(image: Image.Image) -> tuple[Image.Image, list]:
-    """
-    Try 0 / 90 / 180 / 270 degree rotations; pick the one EasyOCR
-    returns the most characters for. Returns (rotated_image, ocr_results).
-    """
     best_img, best_results, best_count = image, [], 0
     for angle in (0, 90, 180, 270):
         rotated = image.rotate(angle, expand=True)
@@ -111,6 +149,63 @@ def _clean_text(results) -> str:
     return " ".join(parts)
 
 
+# ---------------------------------------------------------------------------
+# Spatial helpers
+# ---------------------------------------------------------------------------
+
+def _bbox_center(bbox) -> tuple[float, float]:
+    xs = [p[0] for p in bbox]
+    ys = [p[1] for p in bbox]
+    return sum(xs) / len(xs), sum(ys) / len(ys)
+
+
+def _region(results, x0: float, y0: float, x1: float, y1: float) -> list:
+    """Return OCR results whose center falls within the rectangle."""
+    out = []
+    for bbox, text, conf in results:
+        cx, cy = _bbox_center(bbox)
+        if x0 <= cx <= x1 and y0 <= cy <= y1:
+            out.append((bbox, text, conf))
+    return out
+
+
+def _near_label(results, keywords: list[str], *, right=True, below=False,
+                max_dx: float = 600, max_dy: float = 45) -> str | None:
+    """Return text found to the right of / below the first matching keyword box."""
+    for i, (bbox, text, _) in enumerate(results):
+        if not any(kw in text.lower() for kw in keywords):
+            continue
+        label_rx = max(p[0] for p in bbox)
+        label_by = max(p[1] for p in bbox)
+        _, label_cy = _bbox_center(bbox)
+
+        candidates: list[tuple[float, str]] = []
+        for j, (ob, ot, _) in enumerate(results):
+            if i == j:
+                continue
+            if any(kw in ot.lower() for kw in keywords):
+                continue
+            if any(n in ot.lower() for n in _NOISE):
+                continue
+            ocx, ocy = _bbox_center(ob)
+            olx = min(p[0] for p in ob)
+            oty = min(p[1] for p in ob)
+
+            if right and olx >= label_rx - 10 and abs(ocy - label_cy) <= max_dy and 0 < ocx - label_rx <= max_dx:
+                candidates.append((ocx, ot))
+            if below and oty >= label_by - 5 and abs(ocx - label_rx) <= max_dx and 0 < ocy - label_cy <= max_dy * 3:
+                candidates.append((ocy * 10000 + ocx, ot))
+
+        if candidates:
+            candidates.sort(key=lambda x: x[0])
+            return " ".join(c[1] for c in candidates[:6]).strip()
+    return None
+
+
+# ---------------------------------------------------------------------------
+# Bank detection from printed text
+# ---------------------------------------------------------------------------
+
 def _detect_bank_from_text(text: str) -> str | None:
     lower = text.lower()
     for bank_name, keywords in BANK_KEYWORDS.items():
@@ -119,78 +214,153 @@ def _detect_bank_from_text(text: str) -> str | None:
     return None
 
 
-def _micr_region(image: Image.Image, results) -> tuple[Image.Image, list]:
-    """
-    Find the horizontal band that contains the most digit clusters —
-    that is the MICR line. Falls back to the bottom 22 % of the image.
-    """
-    w, h = image.size
+# ---------------------------------------------------------------------------
+# MICR parser
+# ---------------------------------------------------------------------------
+# Pakistani MICR (E13B) format:
+#   ⑆ CHEQUE_NO ⑆  BANK(3) BRANCH  ⑉  ACCOUNT_NO ⑆  AMOUNT ⑈
+# EasyOCR typically reads ⑆ as " or | and ⑉ as :
 
-    # Group OCR boxes by vertical band (10 % slices)
-    band_digits: dict[int, int] = {}
-    for bbox, text, _ in results:
-        top_y = int(min(p[1] for p in bbox))
-        band = int(top_y / h * 10)
-        digit_count = sum(1 for c in text if c.isdigit())
-        band_digits[band] = band_digits.get(band, 0) + digit_count
+def _parse_micr(results, image_height: int) -> dict:
+    micr_r = [r for r in results if min(p[1] for p in r[0]) > image_height * 0.72]
+    raw = " ".join(r[1] for r in micr_r).strip()
 
-    if band_digits:
-        best_band = max(band_digits, key=band_digits.get)
-        # Widen the crop by one band on each side
-        y0 = max(0, (best_band - 1) * h // 10)
-        y1 = min(h, (best_band + 2) * h // 10)
-    else:
-        y0, y1 = int(h * 0.78), h
+    out: dict = {
+        "micr_raw": raw or None,
+        "micr_cheque_number": None,
+        "micr_issuer_bank": None,
+        "micr_issuer_branch": None,
+        "micr_issuer_account_number": None,
+        "micr_amount": None,
+    }
 
-    micr_crop = image.crop((0, y0, w, y1))
-    micr_results = [r for r in results if min(p[1] for p in r[0]) >= y0]
-    return micr_crop, micr_results
+    if not raw:
+        return out
+
+    # Normalise transit symbol (⑆) variants that OCR produces
+    norm = re.sub(r'[""''`´|⑆⑆]', '"', raw)
+
+    # Patterns from most to least specific
+    # Format: "CHEQUE_NO" BANK(3) BRANCH : "ACCOUNT" AMOUNT
+    _pats = [
+        r'"(\d{4,10})"\s*(\d{3})\s*(\d[\d\s]{1,8}?)\s*[:⑇]\s*"([^"]{6,})"\s*(\d*)',
+        r'"(\d{4,10})"\s*(\d{3})\s*(\d+)[:⑇]"([^"]{6,})"\s*(\d*)',
+        r'"(\d{4,10})".{0,15}(\d{3})(\d{3,8}).{0,6}"([\d\s?]{6,})"\s*(\d*)',
+    ]
+    for pat in _pats:
+        m = re.search(pat, norm)
+        if m:
+            out["micr_cheque_number"]        = m.group(1).strip()
+            out["micr_issuer_bank"]          = m.group(2).strip()
+            out["micr_issuer_branch"]        = re.sub(r"\s+", "", m.group(3))
+            out["micr_issuer_account_number"] = re.sub(r"[\s?]", "", m.group(4)) or None
+            out["micr_amount"]               = m.group(5).strip() or None
+            return out
+
+    # Fallback: heuristic digit-group scan
+    groups = re.findall(r"\d+", re.sub(r"[^\d\s]", " ", raw))
+    for g in groups:
+        if len(g) == 3 and g in PAKISTANI_BANKS and out["micr_issuer_bank"] is None:
+            out["micr_issuer_bank"] = g
+        elif len(g) >= 6 and out["micr_cheque_number"] is None:
+            out["micr_cheque_number"] = g
+
+    return out
 
 
-def _parse_micr(results) -> tuple[str | None, str | None]:
-    """
-    Pakistani MICR transit block = 10 digits: bank code (4) + branch code (6).
-    Try first-4 and last-4 of any 10-digit group against PAKISTANI_BANKS.
-    """
-    texts = [r[1] for r in results]
-    raw = " ".join(texts)
+# ---------------------------------------------------------------------------
+# OCR field extraction  (computer-printed text)
+# ---------------------------------------------------------------------------
 
-    # Strip noise
-    digit_only_groups = re.findall(r"\d+", re.sub(r"[^\d\s]", " ", raw))
+def _extract_ocr_fields(results, w: int, h: int) -> dict:
+    top_right = _region(results, w * 0.45, 0,        w,        h * 0.30)
+    mid_area  = _region(results, 0,        h * 0.45, w * 0.80, h * 0.82)
 
-    bank_code: str | None = None
+    tr_text = " ".join(r[1] for r in top_right)
+    mid_text = " ".join(r[1] for r in mid_area)
 
-    # Priority 1: 10-digit group (full transit)
-    for g in digit_only_groups:
-        if len(g) == 10:
-            if g[:4] in PAKISTANI_BANKS:
-                bank_code = g[:4]
+    # Cheque number — near "Cheque No" label or standalone 6-8 digit run
+    cheque_no = _near_label(top_right, ["cheque no", "cheque", "chq"])
+    if not cheque_no:
+        m = re.search(r"\b(\d{6,8})\b", tr_text)
+        cheque_no = m.group(1) if m else None
+
+    # Date — near "Date" / "Dt" label (printed date if any)
+    ocr_date = _near_label(top_right, ["date", "dt."])
+    if not ocr_date:
+        m = re.search(r"\b(\d{1,2}[/\-]\d{1,2}[/\-]\d{2,4})\b", tr_text)
+        ocr_date = m.group(1) if m else None
+
+    # IBAN / account number in the middle area
+    iban_m = re.search(r"PK\d{2}\s*[A-Z0-9]{4}\s*[\d\s]{12,}", mid_text, re.IGNORECASE)
+    ocr_acc_no = re.sub(r"\s+", "", iban_m.group(0)) if iban_m else None
+
+    # Account title — line containing Mr/Mrs/MR or near "account title" label
+    ocr_acc_title = _near_label(mid_area, ["mr.", "mrs.", "ms.", "m/s", "account title", "a/c title"])
+    if not ocr_acc_title:
+        for _, text, _ in mid_area:
+            if re.match(r"(mr\.?|mrs\.?|ms\.?|m/s)\s+", text, re.IGNORECASE):
+                ocr_acc_title = text
                 break
-            if g[6:] in PAKISTANI_BANKS:
-                bank_code = g[6:]
-                break
 
-    # Priority 2: adjacent groups forming 10 digits
-    if bank_code is None:
-        for i in range(len(digit_only_groups) - 1):
-            combined = digit_only_groups[i] + digit_only_groups[i + 1]
-            if len(combined) == 10:
-                if combined[:4] in PAKISTANI_BANKS:
-                    bank_code = combined[:4]
-                    break
-                if combined[6:] in PAKISTANI_BANKS:
-                    bank_code = combined[6:]
-                    break
+    return {
+        "ocr_cheque_number":        cheque_no,
+        "ocr_cheque_date":          ocr_date,
+        "ocr_issuer_account_number": ocr_acc_no,
+        "ocr_issuer_account_title": ocr_acc_title,
+    }
 
-    # Priority 3: standalone 4-digit code
-    if bank_code is None:
-        for g in digit_only_groups:
-            if len(g) == 4 and g in PAKISTANI_BANKS:
-                bank_code = g
-                break
 
-    return raw.strip() or None, bank_code
+# ---------------------------------------------------------------------------
+# ICR field extraction  (handwritten text)
+# ---------------------------------------------------------------------------
 
+def _extract_icr_fields(results, w: int, h: int) -> dict:
+    pay_region    = _region(results, 0,        h * 0.20, w,        h * 0.52)
+    words_region  = _region(results, 0,        h * 0.33, w * 0.78, h * 0.62)
+    amount_region = _region(results, w * 0.55, h * 0.28, w,        h * 0.65)
+    date_region   = _region(results, w * 0.45, 0,        w,        h * 0.28)
+
+    # Payee name — handwritten after "Pay" label
+    payee = _near_label(pay_region, ["pay ", "pay:", "payee"], max_dx=900)
+
+    # Amount in words — handwritten after "Rupees" / "Rs."
+    amount_words = _near_label(words_region, ["rupees", "rs.", "amount in words"], max_dx=900)
+    if not amount_words:
+        amount_words = _near_label(words_region, ["rupees", "rs."], below=True, max_dy=60)
+
+    # Amount in figures — PKR box on the right
+    amt_text = " ".join(r[1] for r in amount_region)
+    m = re.search(r"(?:PKR|Rs\.?)\s*([\d,]+(?:\.\d{1,2})?(?:/\s*-?)?)", amt_text, re.IGNORECASE)
+    icr_amount = m.group(1).strip() if m else None
+    if not icr_amount:
+        m = re.search(r"([\d,]{4,}(?:\.\d{1,2})?(?:/\s*-?)?)", amt_text)
+        icr_amount = m.group(1).strip() if m else None
+
+    # Date — handwritten digits in date boxes
+    dt_text = " ".join(r[1] for r in date_region)
+    icr_date = _near_label(date_region, ["date", "dt."])
+    if not icr_date:
+        m = re.search(r"\b(\d{1,2}[/\-\s]\d{1,2}[/\-\s]\d{2,4})\b", dt_text)
+        icr_date = m.group(1).strip() if m else None
+    if not icr_date:
+        # Cheque date boxes produce individual digits — collect and format
+        singles = re.findall(r"(?<!\d)\d(?!\d)", dt_text)
+        if len(singles) >= 8:
+            d = "".join(singles[:8])
+            icr_date = f"{d[:2]}/{d[2:4]}/{d[4:]}"
+
+    return {
+        "icr_payee_title":  payee,
+        "icr_amount_words": amount_words,
+        "icr_amount":       icr_amount,
+        "icr_cheque_date":  icr_date,
+    }
+
+
+# ---------------------------------------------------------------------------
+# Bank match validation
+# ---------------------------------------------------------------------------
 
 def _banks_match(code_bank: str, logo_bank: str) -> bool:
     a_keys = BANK_KEYWORDS.get(code_bank, [code_bank.lower()])
@@ -199,6 +369,10 @@ def _banks_match(code_bank: str, logo_bank: str) -> bool:
         k in code_bank.lower() for k in b_keys
     )
 
+
+# ---------------------------------------------------------------------------
+# API
+# ---------------------------------------------------------------------------
 
 @app.post("/api/analyze")
 async def analyze_cheque(file: UploadFile = File(...)) -> dict:
@@ -215,45 +389,56 @@ async def analyze_cheque(file: UploadFile = File(...)) -> dict:
 
     image = Image.open(BytesIO(contents)).convert("RGB")
 
-    # --- Auto-rotate to the orientation with most readable text ---
     rotated, all_results = _best_rotation(image)
+    w, h = rotated.size
 
     full_text = _clean_text(all_results)
 
-    # --- Find MICR region ---
-    _, micr_results = _micr_region(rotated, all_results)
-    raw_micr, bank_code = _parse_micr(micr_results)
+    micr      = _parse_micr(all_results, h)
+    ocr_f     = _extract_ocr_fields(all_results, w, h)
+    icr_f     = _extract_icr_fields(all_results, w, h)
 
-    # --- Detect bank from full image text ---
-    logo_bank = _detect_bank_from_text(full_text)
-
-    # --- Is this a cheque? Needs at least two digit groups of 4+ digits ---
-    all_digits = re.findall(r"\d{4,}", re.sub(r"[^\d\s]", " ", full_text))
-    is_cheque = len(all_digits) >= 2 and (bank_code is not None or logo_bank is not None)
-
+    bank_code          = micr["micr_issuer_bank"]
     bank_name_from_code = PAKISTANI_BANKS.get(bank_code) if bank_code else None
+    logo_bank          = _detect_bank_from_text(full_text)
+
+    all_digits = re.findall(r"\d{4,}", re.sub(r"[^\d\s]", " ", full_text))
+    is_cheque  = len(all_digits) >= 2 and (bank_code is not None or logo_bank is not None)
 
     is_match: bool | None = None
     if bank_name_from_code and logo_bank:
         is_match = _banks_match(bank_name_from_code, logo_bank)
 
     confidence = (
-        "high" if (bank_code and logo_bank)
-        else "medium" if (bank_code or logo_bank)
-        else "low"
+        "high"   if (bank_code and logo_bank) else
+        "medium" if (bank_code or  logo_bank) else
+        "low"
     )
 
-    notes = f"MICR OCR: {raw_micr[:150]}" if raw_micr else "No MICR digits detected."
-
     return {
-        "is_cheque": is_cheque,
-        "micr_line": raw_micr,
-        "bank_code": bank_code,
-        "logo_bank": logo_bank,
-        "is_match": is_match,
-        "confidence": confidence,
-        "notes": notes,
-        "bank_name_from_code": bank_name_from_code,
+        # Validation summary
+        "is_cheque":   is_cheque,
+        "confidence":  confidence,
+        "is_match":    is_match,
+        "logo_bank":   logo_bank,
+        # MICR fields
+        "micr_cheque_number":         micr["micr_cheque_number"],
+        "micr_issuer_bank":           bank_code,
+        "micr_issuer_bank_name":      bank_name_from_code,
+        "micr_issuer_branch":         micr["micr_issuer_branch"],
+        "micr_issuer_account_number": micr["micr_issuer_account_number"],
+        "micr_amount":                micr["micr_amount"],
+        "micr_raw":                   micr["micr_raw"],
+        # OCR fields (computer-printed)
+        "ocr_cheque_number":          ocr_f["ocr_cheque_number"],
+        "ocr_cheque_date":            ocr_f["ocr_cheque_date"],
+        "ocr_issuer_account_number":  ocr_f["ocr_issuer_account_number"],
+        "ocr_issuer_account_title":   ocr_f["ocr_issuer_account_title"],
+        # ICR fields (handwritten)
+        "icr_payee_title":   icr_f["icr_payee_title"],
+        "icr_amount_words":  icr_f["icr_amount_words"],
+        "icr_amount":        icr_f["icr_amount"],
+        "icr_cheque_date":   icr_f["icr_cheque_date"],
     }
 
 

@@ -1,0 +1,13 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(Get-ChildItem -Path \"e:\\\\Anas\\\\Projects\\\\cheque-validator\" -Recurse -Force)",
+      "Bash(Select-Object FullName)",
+      "PowerShell(head -100)",
+      "Bash(uvicorn main:app --host 0.0.0.0 --port 8000 --reload)",
+      "PowerShell(python --version)",
+      "PowerShell(python -m uvicorn --version)",
+      "PowerShell(pip install -r \"e:\\\\Anas\\\\Projects\\\\cheque-validator\\\\requirements.txt\")"
+    ]
+  }
+}
