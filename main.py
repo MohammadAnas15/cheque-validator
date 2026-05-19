@@ -305,18 +305,19 @@ def _extract_name_near_iban(text: str) -> str | None:
 # MICR parser
 # ---------------------------------------------------------------------------
 # Pakistani MICR (E13B) format:
-#   ⑆ CHEQUE_NO ⑆  BANK(3) BRANCH  ⑉  ACCOUNT_NO ⑆  AMOUNT ⑈
-# EasyOCR reads ⑆ as quote-like chars and ⑉ as colon.
+#   ⑆ CHEQUE_NO ⑆  BANK(3) BRANCH(4)  ⑉  ACCOUNT_NO ⑆  AMOUNT ⑈
+# Bank+branch are often glued (08601494 = 086 + 0149); EasyOCR may add a spurious
+# digit before ⑉/colon. EasyOCR reads ⑆ as quote-like chars and ⑉ as colon.
 
 def _micr_from_digit_stream(text: str) -> dict | None:
-    """Parse glued Pakistani MICR: CHEQUE + BANK(3)+BRANCH(4-5) + ACCOUNT(14-18) + AMOUNT."""
+    """Parse glued Pakistani MICR: CHEQUE + BANK(3)+BRANCH(4) + ACCOUNT(16) + AMOUNT."""
     corrected = text.translate(_MICR_FIX)
     norm = re.sub(r'[""\'\'`´|⑆]+', '"', corrected)
     norm = re.sub(r"(?<=\d)\s+(?=\d)", "", norm)
 
-    # Bank+branch often run together before : or '  (e.g. 08601494:0109000297782151)
+    # Bank+branch glued before : (e.g. 08601494:0109000297782151 → 086, 0149, account)
     m = re.search(
-        r'["\']?(\d{6,10})["\']?\s*(\d{3})(\d{4,5})\s*[:\'⑆]?\s*([\d\s?]{12,22})',
+        r'["\']?(\d{6,10})["\']?\s*(\d{3})(\d{4})\d?\s*[:\'⑆]?\s*([\d\s?]{12,22})',
         norm,
     )
     if m:
@@ -336,14 +337,29 @@ def _micr_from_digit_stream(text: str) -> dict | None:
             }
 
     digits = re.sub(r"\D", "", norm)
+    m = re.search(r"(\d{3})(\d{4})\d?(\d{16})", digits)
+    if m and m.group(1) in PAKISTANI_BANKS:
+        amount = digits[m.end(): m.end() + 3] if len(digits) >= m.end() + 3 else None
+        cheque_m = re.search(r"(\d{6,10})", norm[: max(0, digits.find(m.group(1)) + 5)])
+        return {
+            "micr_cheque_number": cheque_m.group(1) if cheque_m else None,
+            "micr_issuer_bank": m.group(1),
+            "micr_issuer_branch": m.group(2),
+            "micr_issuer_account_number": m.group(3),
+            "micr_amount": amount if amount and amount.isdigit() else None,
+        }
+
     for bank_code in PAKISTANI_BANKS:
         idx = digits.find(bank_code)
-        if idx < 0 or idx + 27 > len(digits):
+        if idx < 0 or idx + 23 > len(digits):
             continue
-        branch = digits[idx + 3: idx + 8]
-        account = digits[idx + 8: idx + 24]
-        amount = digits[idx + 24: idx + 27] if len(digits) >= idx + 27 else None
-        if branch.isdigit() and account.isdigit() and len(account) >= 14:
+        branch = digits[idx + 3: idx + 7]
+        acct_start = idx + 7
+        if acct_start < len(digits) and digits[acct_start] in "4:" and digits[acct_start:acct_start + 2] != "40":
+            acct_start += 1
+        account = digits[acct_start: acct_start + 16]
+        amount = digits[acct_start + 16: acct_start + 19] if len(digits) >= acct_start + 19 else None
+        if branch.isdigit() and len(branch) == 4 and account.isdigit() and len(account) == 16:
             cheque_m = re.search(r"(\d{6,10})", norm[: idx + 20])
             return {
                 "micr_cheque_number": cheque_m.group(1) if cheque_m else None,
@@ -365,7 +381,7 @@ def _parse_micr(results, image_height: int, full_text: str = "") -> dict:
         band = int(top_y / image_height * 10)
         lower = text.lower()
         score = sum(1 for c in text if c.isdigit())
-        if re.search(r"\d{3}\d{4,5}", text):
+        if re.search(r"\d{3}\d{4}", text):
             score += 30
         if "iban" in lower:
             score -= 20
@@ -410,9 +426,9 @@ def _parse_micr(results, image_height: int, full_text: str = "") -> dict:
     _pats = [
         # Full:  "CHEQUE(4-10)" BANK(3) BRANCH(2-8) : "ACCOUNT(8+)" AMOUNT
         r'"(\d{4,10})"\s*(\d{3})\s*(\d{2,8})\s*[:]\s*"?(\d{8,})"?\s*(\d*)',
-        # Bank+branch glued: "46525028"08601494:0109000297782151
-        r'"(\d{4,10})"\s*(\d{3})(\d{4,5})\s*[:]\s*"?([\d\s?]{12,22})"?\s*[,]?\s*(\d{3})',
-        r'"(\d{4,10})"\s*(\d{3})(\d{4,5})\s*[:]\s*([\d\s?]{12,22})',
+        # Bank+branch glued (branch always 4 digits): "46525028"08601494:0109000297782151
+        r'"(\d{4,10})"\s*(\d{3})(\d{4})\d?\s*[:]\s*"?([\d\s?]{12,22})"?\s*[,]?\s*(\d{3})',
+        r'"(\d{4,10})"\s*(\d{3})(\d{4})\d?\s*[:]\s*([\d\s?]{12,22})',
         # Relaxed account field (may contain non-digits from OCR noise)
         r'"(\d{4,10})"\s*(\d{3})\s*(\d{2,8})[:\s]+"?([^"\n]{6,})"?\s*(\d*)',
         # Very loose — two quoted blocks, extract bank from between
@@ -423,7 +439,7 @@ def _parse_micr(results, image_height: int, full_text: str = "") -> dict:
         if m:
             out["micr_cheque_number"]         = m.group(1)
             out["micr_issuer_bank"]           = m.group(2)
-            out["micr_issuer_branch"]         = re.sub(r"\s+", "", m.group(3))
+            out["micr_issuer_branch"]         = re.sub(r"\s+", "", m.group(3))[:4]
             out["micr_issuer_account_number"] = re.sub(r"[\s?]", "", m.group(4)) or None
             out["micr_amount"]                = (m.group(5).strip() or None) if len(m.groups()) >= 5 else None
             return out
