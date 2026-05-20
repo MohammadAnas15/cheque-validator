@@ -119,6 +119,12 @@ _NOISE = {"camscanner", "cs", "adobe", "scan", "scanned", "please do not write"}
 # Common substitutions: L/A→4, E/G→6, I/l→1, O/o→0, Z→2, S→5, B→8, T→7
 _MICR_FIX = str.maketrans("LAEGIlOoZSBT", "446611002587")
 
+# Pakistani MICR currency codes (last 3 digits of MICR line)
+MICR_CURRENCY: dict[str, str] = {
+    "000": "Rupee",
+    "001": "Dollar",
+}
+
 
 # ---------------------------------------------------------------------------
 # Image helpers
@@ -305,12 +311,13 @@ def _extract_name_near_iban(text: str) -> str | None:
 # MICR parser
 # ---------------------------------------------------------------------------
 # Pakistani MICR (E13B) format:
-#   ⑆ CHEQUE_NO ⑆  BANK(3) BRANCH(4)  ⑉  ACCOUNT_NO ⑆  AMOUNT ⑈
+#   ⑆ CHEQUE_NO(8) ⑆  BANK(3) BRANCH(4)  ⑆  ACCOUNT_NO(16) ⑆  CURRENCY(3)
+# CURRENCY: 000=Rupee, 001=Dollar
 # Bank+branch are often glued (08601494 = 086 + 0149); EasyOCR may add a spurious
 # digit before ⑉/colon. EasyOCR reads ⑆ as quote-like chars and ⑉ as colon.
 
 def _micr_from_digit_stream(text: str) -> dict | None:
-    """Parse glued Pakistani MICR: CHEQUE + BANK(3)+BRANCH(4) + ACCOUNT(16) + AMOUNT."""
+    """Parse glued Pakistani MICR: CHEQUE(8) + BANK(3)+BRANCH(4) + ACCOUNT(16) + CURRENCY(3)."""
     corrected = text.translate(_MICR_FIX)
     norm = re.sub(r'[""\'\'`´|⑆]+', '"', corrected)
     norm = re.sub(r"(?<=\d)\s+(?=\d)", "", norm)
@@ -322,31 +329,30 @@ def _micr_from_digit_stream(text: str) -> dict | None:
     )
     if m:
         acct = re.sub(r"[\s?]", "", m.group(4))
-        amount_m = re.search(r"(\d{3})\s*,?\s*$", acct)
-        amount = None
-        if amount_m and len(acct) > 18:
-            amount = amount_m.group(1)
-            acct = acct[: -len(amount_m.group(0))].rstrip(",")
-        if 12 <= len(acct) <= 20:
+        currency = None
+        if len(acct) > 16:
+            currency = acct[16:19] if len(acct) >= 19 else acct[16:]
+            acct = acct[:16]
+        if 12 <= len(acct) <= 16:
             return {
                 "micr_cheque_number": m.group(1),
                 "micr_issuer_bank": m.group(2),
                 "micr_issuer_branch": m.group(3),
-                "micr_issuer_account_number": acct[:16] if len(acct) > 16 else acct,
-                "micr_amount": amount,
+                "micr_issuer_account_number": acct,
+                "micr_currency": currency,
             }
 
     digits = re.sub(r"\D", "", norm)
     m = re.search(r"(\d{3})(\d{4})\d?(\d{16})", digits)
     if m and m.group(1) in PAKISTANI_BANKS:
-        amount = digits[m.end(): m.end() + 3] if len(digits) >= m.end() + 3 else None
+        currency = digits[m.end(): m.end() + 3] if len(digits) >= m.end() + 3 else None
         cheque_m = re.search(r"(\d{6,10})", norm[: max(0, digits.find(m.group(1)) + 5)])
         return {
             "micr_cheque_number": cheque_m.group(1) if cheque_m else None,
             "micr_issuer_bank": m.group(1),
             "micr_issuer_branch": m.group(2),
             "micr_issuer_account_number": m.group(3),
-            "micr_amount": amount if amount and amount.isdigit() else None,
+            "micr_currency": currency if currency and currency.isdigit() else None,
         }
 
     for bank_code in PAKISTANI_BANKS:
@@ -358,7 +364,7 @@ def _micr_from_digit_stream(text: str) -> dict | None:
         if acct_start < len(digits) and digits[acct_start] in "4:" and digits[acct_start:acct_start + 2] != "40":
             acct_start += 1
         account = digits[acct_start: acct_start + 16]
-        amount = digits[acct_start + 16: acct_start + 19] if len(digits) >= acct_start + 19 else None
+        currency = digits[acct_start + 16: acct_start + 19] if len(digits) >= acct_start + 19 else None
         if branch.isdigit() and len(branch) == 4 and account.isdigit() and len(account) == 16:
             cheque_m = re.search(r"(\d{6,10})", norm[: idx + 20])
             return {
@@ -366,7 +372,7 @@ def _micr_from_digit_stream(text: str) -> dict | None:
                 "micr_issuer_bank": bank_code,
                 "micr_issuer_branch": branch,
                 "micr_issuer_account_number": account[:16],
-                "micr_amount": amount,
+                "micr_currency": currency,
             }
     return None
 
@@ -405,7 +411,7 @@ def _parse_micr(results, image_height: int, full_text: str = "") -> dict:
         "micr_issuer_bank": None,
         "micr_issuer_branch": None,
         "micr_issuer_account_number": None,
-        "micr_amount": None,
+        "micr_currency": None,
     }
 
     if not raw:
@@ -424,24 +430,26 @@ def _parse_micr(results, image_height: int, full_text: str = "") -> dict:
 
     # 4. Try structured patterns (most → least strict)
     _pats = [
-        # Full:  "CHEQUE(4-10)" BANK(3) BRANCH(2-8) : "ACCOUNT(8+)" AMOUNT
-        r'"(\d{4,10})"\s*(\d{3})\s*(\d{2,8})\s*[:]\s*"?(\d{8,})"?\s*(\d*)',
-        # Bank+branch glued (branch always 4 digits): "46525028"08601494:0109000297782151
-        r'"(\d{4,10})"\s*(\d{3})(\d{4})\d?\s*[:]\s*"?([\d\s?]{12,22})"?\s*[,]?\s*(\d{3})',
+        # Full: "CHEQUE(4-10)" BANK(3) BRANCH(4) [extra?] : ACCOUNT(16) [sep] CURRENCY(3)
+        # Branch strictly 4 digits; extra digit before : handles MICR ⑉ read as digit
+        r'"(\d{4,10})"\s*(\d{3})(\d{4})\d?\s*[:⑉]\s*"?(\d{16})"?\s*[,]?\s*(\d{3,4})',
+        # Branch 4 digits, account flexible length (OCR noise)
+        r'"(\d{4,10})"\s*(\d{3})(\d{4})\d?\s*[:]\s*"?([\d\s?]{12,22})"?\s*[,]?\s*(\d{3,4})',
         r'"(\d{4,10})"\s*(\d{3})(\d{4})\d?\s*[:]\s*([\d\s?]{12,22})',
-        # Relaxed account field (may contain non-digits from OCR noise)
-        r'"(\d{4,10})"\s*(\d{3})\s*(\d{2,8})[:\s]+"?([^"\n]{6,})"?\s*(\d*)',
+        # Relaxed branch (2-8 digits) — fallback
+        r'"(\d{4,10})"\s*(\d{3})\s*(\d{2,8})[:\s]+"?([^"\n]{6,})"?\s*(\d{3,4})',
         # Very loose — two quoted blocks, extract bank from between
         r'"(\d{4,10})".{1,25}?(\d{3})(\d{2,8}).{0,10}"([\d\s]{6,})"',
     ]
     for pat in _pats:
         m = re.search(pat, norm)
         if m:
+            raw_curr = (m.group(5).strip() or None) if len(m.groups()) >= 5 else None
             out["micr_cheque_number"]         = m.group(1)
             out["micr_issuer_bank"]           = m.group(2)
             out["micr_issuer_branch"]         = re.sub(r"\s+", "", m.group(3))[:4]
             out["micr_issuer_account_number"] = re.sub(r"[\s?]", "", m.group(4)) or None
-            out["micr_amount"]                = (m.group(5).strip() or None) if len(m.groups()) >= 5 else None
+            out["micr_currency"]              = raw_curr[:3] if raw_curr else None
             return out
 
     stream = _micr_from_digit_stream(norm) or _micr_from_digit_stream(full_text)
@@ -466,7 +474,8 @@ def _parse_micr(results, image_height: int, full_text: str = "") -> dict:
 
 def _extract_ocr_fields(results, w: int, h: int, full_text: str = "") -> dict:
     top_right = _region(results, w * 0.45, 0,        w,        h * 0.35)
-    mid_area  = _region(results, 0,        h * 0.45, w * 0.80, h * 0.85)
+    # Widen vertically — UBL-style cheques put IBAN/account-title lower (55–85%)
+    mid_area  = _region(results, 0,        h * 0.40, w * 0.80, h * 0.88)
 
     tr_text  = " ".join(r[1] for r in top_right)
     mid_text = " ".join(r[1] for r in mid_area)
@@ -481,7 +490,7 @@ def _extract_ocr_fields(results, w: int, h: int, full_text: str = "") -> dict:
     if cheque_no:
         cheque_no = re.sub(r"^\D+", "", cheque_no).strip()
 
-      # Date — near "Date" / "Dt" label
+    # Date — near "Date" / "Dt" label
     ocr_date = _near_label(top_right, ["date", "dt."])
     if not ocr_date:
         m = re.search(r"\b(\d{1,2}[/\-]\d{1,2}[/\-]\d{2,4})\b", tr_text)
@@ -490,32 +499,40 @@ def _extract_ocr_fields(results, w: int, h: int, full_text: str = "") -> dict:
         m = re.search(r"\b(\d{2}[-/]\d{2}[-/]\d{4})\b", all_text)
         ocr_date = m.group(1) if m else None
 
-    # IBAN / account number — PK format anywhere in mid area
+    # IBAN / account number — search mid area first, then full text
     iban_m = re.search(r"PK\d{2}\s*[A-Z0-9]{4}\s*[\d\s]{12,}", mid_text, re.IGNORECASE)
     ocr_acc_no = re.sub(r"\s+", "", iban_m.group(0)).upper() if iban_m else None
     if not ocr_acc_no:
         ocr_acc_no = _extract_iban(all_text)
+    # If still not found, scan for IBAN: label anywhere in full results
+    if not ocr_acc_no:
+        iban_label = _near_label(results, ["iban:", "iban"], max_dx=800)
+        if iban_label:
+            ocr_acc_no = _extract_iban(iban_label) or re.sub(r"\s+", "", iban_label).upper()
 
-    # Account title — standalone all-caps name line, or line right after IBAN
+    # Account title — name on same line as or just below IBAN
     ocr_acc_title = None
     iban_bbox_bottom = None
-    for bbox, text, _ in mid_area:
-        if iban_m and re.search(r"PK\d{2}", text, re.IGNORECASE):
+    search_area = mid_area if iban_m else results
+    for bbox, text, _ in search_area:
+        if re.search(r"PK\d{2}", text, re.IGNORECASE):
             iban_bbox_bottom = max(p[1] for p in bbox)
             break
 
     if iban_bbox_bottom:
-        # Look for a text block just below the IBAN line
-        for bbox, text, _ in mid_area:
+        candidates = []
+        for bbox, text, _ in results:
             top_y = min(p[1] for p in bbox)
-            if (top_y > iban_bbox_bottom - 5
+            if (iban_bbox_bottom - 5 < top_y <= iban_bbox_bottom + 80
                     and re.search(r"[A-Z]{2,}", text)
-                    and not re.search(r"PK\d{2}|IBAN|please|write", text, re.IGNORECASE)):
-                ocr_acc_title = text.strip()
-                break
+                    and not re.search(r"PK\d{2}|IBAN|please|write|below", text, re.IGNORECASE)):
+                candidates.append((top_y, text.strip()))
+        if candidates:
+            candidates.sort()
+            ocr_acc_title = candidates[0][1]
 
     if not ocr_acc_title:
-        ocr_acc_title = _near_label(mid_area, ["mr.", "mrs.", "ms.", "m/s", "account title"])
+        ocr_acc_title = _near_label(mid_area, ["mr.", "mrs.", "ms.", "m/s", "account title", "iban:"], max_dx=900)
     if not ocr_acc_title:
         ocr_acc_title = _extract_name_near_iban(all_text)
 
@@ -532,60 +549,85 @@ def _extract_ocr_fields(results, w: int, h: int, full_text: str = "") -> dict:
 # ---------------------------------------------------------------------------
 
 def _extract_icr_fields(results, w: int, h: int, full_text: str = "") -> dict:
-    pay_region   = _region(results, 0,        h * 0.18, w,        h * 0.55)
-    words_region = _region(results, 0,        h * 0.32, w * 0.80, h * 0.65)
-    date_region  = _region(results, w * 0.42, 0,        w,        h * 0.32)
-    # Payee — handwritten after "Pay" keyword (with or without trailing space/colon)
-    payee = _near_label(pay_region, ["pay ", "pay:", "pay\t", "payee"], max_dx=1000)
+    # UBL-style cheque spatial layout (landscape, properly oriented):
+    #   Date boxes : top-right  — x 38-100%, y  0-25%
+    #   Pay line   : middle     — x  0-100%, y 15-52%
+    #   Rupees line: full-width — x  0-100%, y 38-68%
+    #   PKR box    : right side — x 50-100%, y 22-65%
+    pay_region   = _region(results, 0,        h * 0.15, w,        h * 0.55)
+    words_region = _region(results, 0,        h * 0.35, w,        h * 0.68)
+    date_region  = _region(results, w * 0.38, 0,        w,        h * 0.25)
+    pkr_region   = _region(results, w * 0.50, h * 0.22, w,        h * 0.65)
+
+    # --- Beneficiary (Pay field) ---
+    # Try "Pay" label with/without colon/space, then "payee", then "pay to"
+    payee = _near_label(pay_region, ["pay ", "pay:", "payee", "pay to"], max_dx=1200)
     if not payee:
-        # Try matching "pay" without trailing space (handles merged OCR blocks)
-        payee = _near_label(pay_region, ["pay"], max_dx=1000)
+        payee = _near_label(pay_region, ["pay"], max_dx=1200)
+    # Some cheques put the name below the Pay label
+    if not payee:
+        payee = _near_label(pay_region, ["pay ", "pay:", "pay"], below=True, max_dy=60)
     if not payee and full_text:
-        m = re.search(r"pay\s+([A-Za-z][A-Za-z\s]{2,40}?)(?:\s+rupee|\s+the\b|\s+a/c)", full_text, re.I)
+        m = re.search(
+            r"pay[\s:]+([A-Za-z][A-Za-z\s\.]{2,50}?)(?=\s*rupee|\s*rs\.|\s*bearer|\s*a/c|$)",
+            full_text, re.I,
+        )
         if m:
             payee = re.sub(r"\s+", " ", m.group(1)).strip()
 
-    # Amount in words — after "Rupees" / "Rs." keyword
-    amount_words = _near_label(words_region, ["rupees", "rs.", "amount in words"], max_dx=1000)
+    # --- Amount in words (Rupees field) ---
+    # Try right-of-label first (single-line), then below (two-line layout)
+    amount_words = _near_label(words_region, ["rupees", "rs.", "amount in words"], max_dx=1400)
     if not amount_words:
-        amount_words = _near_label(words_region, ["rupees", "rs."], below=True, max_dy=70)
+        amount_words = _near_label(words_region, ["rupees", "rs."], below=True, max_dy=80)
     if not amount_words and full_text:
         m = re.search(r"rupee[s]?\s+(.+?)(?:\s+pkr\b|\s+only\b|$)", full_text, re.I)
         if m:
             amount_words = re.sub(r"\s+", " ", m.group(1)).strip()
 
-    # Amount in figures — find "PKR" label anywhere in results, take value to the right
-    icr_amount = _near_label(results, ["pkr", "rs."], max_dx=600)
+    # --- Amount in figures (PKR box, right side) ---
+    # Search right side first, then fall back to full results
+    icr_amount = _near_label(pkr_region, ["pkr", "amount in number", "amount in fig"], max_dx=700)
+    if not icr_amount:
+        icr_amount = _near_label(results, ["pkr"], max_dx=700)
     if icr_amount:
-        # Keep only the numeric portion (strip stray text)
         m = re.search(r"([\d,]+(?:\.\d{1,2})?(?:/\s*-?)?)", icr_amount)
         icr_amount = m.group(1).strip() if m else None
     if not icr_amount:
-        # Fallback: monetary pattern must have comma separator OR trailing slash
-        amt_text = " ".join(r[1] for r in _region(results, w * 0.50, h * 0.25, w, h * 0.70))
-        m = re.search(r"(\d{1,3}(?:,\d{3})+(?:\.\d{2})?(?:/\s*-?)?|\d{2,}(?:/\s*-?))", amt_text)
+        # Scan the PKR box area for a monetary pattern
+        amt_text = " ".join(r[1] for r in pkr_region)
+        m = re.search(
+            r"(\d{1,3}(?:,\d{3})+(?:\.\d{2})?(?:/\s*-?)?|\d{4,}(?:/\s*-?)?)",
+            amt_text,
+        )
         icr_amount = m.group(1).strip() if m else None
     if not icr_amount and full_text:
-        m = re.search(r"pkr\s*([\d,]+)\s*/?\s*-?", full_text, re.I)
+        m = re.search(r"pkr\s*([\d,]+(?:\.\d{1,2})?)\s*/?\s*-?", full_text, re.I)
         if m:
             icr_amount = m.group(1).strip()
         else:
             m = re.search(r"\b(\d{3,7})\s*/\s*-?\b", full_text)
             icr_amount = m.group(1) if m else None
 
-    # Date — individual digit boxes in the date area
+    # --- Date (top-right, UBL uses individual D/D/M/M/Y/Y/Y/Y boxes) ---
     dt_text = " ".join(r[1] for r in date_region)
     icr_date = _near_label(date_region, ["date", "dt."])
     if not icr_date:
-        m = re.search(r"\b(\d{1,2}[/\-\s]\d{1,2}[/\-\s]\d{2,4})\b", dt_text)
+        # Full date pattern (filled cheque may have slashes or dashes)
+        m = re.search(r"\b(\d{1,2}[/\-]\d{1,2}[/\-]\d{2,4})\b", dt_text)
         icr_date = m.group(1).strip() if m else None
     if not icr_date:
+        # Box-style: collect individual digit tokens (each box → one digit from OCR)
         singles = re.findall(r"(?<!\d)\d(?!\d)", dt_text)
         if len(singles) >= 8:
             d = "".join(singles[:8])
             icr_date = f"{d[:2]}/{d[2:4]}/{d[4:]}"
+        elif len(singles) >= 6:
+            # Sometimes year is read as 2 digits
+            d = "".join(singles[:6])
+            icr_date = f"{d[:2]}/{d[2:4]}/{d[4:]}"
     if not icr_date and full_text:
-        m = re.search(r"\b(\d{2}[-/]\d{2}[-/]\d{4})\b", full_text)
+        m = re.search(r"\b(\d{2}[-/]\d{2}[-/]\d{2,4})\b", full_text)
         icr_date = m.group(1) if m else None
 
     return {
@@ -655,9 +697,11 @@ async def analyze_cheque(file: UploadFile = File(...)) -> dict:
         if len(title) >= 5 and (len(payee) > 40 or not re.search(r"\b[A-Z]{3,}\b", payee)):
             icr_f["icr_payee_title"] = title
 
-    bank_code          = micr["micr_issuer_bank"]
+    bank_code           = micr["micr_issuer_bank"]
     bank_name_from_code = PAKISTANI_BANKS.get(bank_code) if bank_code else None
-    logo_bank          = _detect_bank_from_text(full_text)
+    logo_bank           = _detect_bank_from_text(full_text)
+    currency_code       = micr.get("micr_currency")
+    currency_name       = MICR_CURRENCY.get(currency_code) if currency_code else None
 
     all_digits = re.findall(r"\d{4,}", re.sub(r"[^\d\s]", " ", full_text))
     is_cheque  = len(all_digits) >= 2 and (bank_code is not None or logo_bank is not None)
@@ -684,7 +728,8 @@ async def analyze_cheque(file: UploadFile = File(...)) -> dict:
         "micr_issuer_bank_name":      bank_name_from_code,
         "micr_issuer_branch":         micr["micr_issuer_branch"],
         "micr_issuer_account_number": micr["micr_issuer_account_number"],
-        "micr_amount":                micr["micr_amount"],
+        "micr_currency":              currency_code,
+        "micr_currency_name":         currency_name,
         "micr_raw":                   micr["micr_raw"],
         # OCR fields (computer-printed)
         "ocr_cheque_number":          ocr_f["ocr_cheque_number"],

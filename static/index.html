@@ -128,7 +128,7 @@
               <div class="info-row"><span class="info-label">Bank Name</span><span id="m-bank-name" class="field-val"></span></div>
               <div class="info-row"><span class="info-label">Branch Code</span><span id="m-branch" class="field-val"></span></div>
               <div class="info-row"><span class="info-label">Account No.</span><span id="m-account" class="field-val"></span></div>
-              <div class="info-row"><span class="info-label">Amount</span><span id="m-amount" class="field-val"></span></div>
+              <div class="info-row"><span class="info-label">Currency</span><span id="m-currency" class="field-val"></span></div>
             </div>
           </div>
         </div>
@@ -150,17 +150,17 @@
         <!-- ICR fields -->
         <div class="col-12">
           <div class="card shadow-sm">
-            <div class="card-header fw-semibold"><i class="bi bi-pencil me-1"></i> ICR Fields <small class="text-muted fw-normal">(handwritten)</small></div>
+            <div class="card-header fw-semibold"><i class="bi bi-pencil me-1"></i> Handwritten Fields</div>
             <div class="card-body">
-              <div class="section-header">Hand-Written</div>
+              <div class="section-header">Filled by Account Holder</div>
               <div class="row g-2">
                 <div class="col-sm-6">
-                  <div class="info-row"><span class="info-label">Payee</span><span id="i-payee" class="field-val"></span></div>
+                  <div class="info-row"><span class="info-label">Beneficiary (Pay)</span><span id="i-payee" class="field-val"></span></div>
                   <div class="info-row"><span class="info-label">Date</span><span id="i-date" class="field-val"></span></div>
                 </div>
                 <div class="col-sm-6">
-                  <div class="info-row"><span class="info-label">Amount (figures)</span><span id="i-amount" class="field-val"></span></div>
-                  <div class="info-row"><span class="info-label">Amount (words)</span><span id="i-words" class="field-val"></span></div>
+                  <div class="info-row"><span class="info-label">Amount in Figures (PKR)</span><span id="i-amount" class="field-val"></span></div>
+                  <div class="info-row"><span class="info-label">Amount in Words (Rupees)</span><span id="i-words" class="field-val"></span></div>
                 </div>
               </div>
             </div>
@@ -303,7 +303,10 @@
     val('m-bank-name', d.micr_issuer_bank_name);
     val('m-branch',    d.micr_issuer_branch);
     val('m-account',   d.micr_issuer_account_number);
-    val('m-amount',    d.micr_amount);
+    const currencyLabel = d.micr_currency_name
+      ? `${d.micr_currency_name} (${d.micr_currency})`
+      : d.micr_currency || null;
+    val('m-currency', currencyLabel);
 
     // OCR fields
     val('o-cheque-no', d.ocr_cheque_number);
