@@ -1,11 +1,13 @@
 import re
 import ssl
+import concurrent.futures
 from io import BytesIO
 from pathlib import Path
 
 # Allow EasyOCR to download models behind corporate/self-signed proxies
 ssl._create_default_https_context = ssl._create_unverified_context
 
+import cv2
 import numpy as np
 from fastapi import FastAPI, File, HTTPException, UploadFile
 from fastapi.responses import FileResponse
@@ -119,6 +121,111 @@ _NOISE = {"camscanner", "cs", "adobe", "scan", "scanned", "please do not write"}
 # Common substitutions: L/A→4, E/G→6, I/l→1, O/o→0, Z→2, S→5, B→8, T→7
 _MICR_FIX = str.maketrans("LAEGIlOoZSBT", "446611002587")
 
+# ---------------------------------------------------------------------------
+# Logo-based bank detection
+# ---------------------------------------------------------------------------
+
+_BANK_LOGO_DIR = Path(__file__).parent / "BankLogo"
+
+# Maps logo filenames → canonical bank name (None = not a cheque-issuing bank)
+_LOGO_BANK_MAP: dict[str, str | None] = {
+    "HBL-logo.png":                "HABIB BANK LTD",
+    "HBL-Konnect-Logo.png":        "HABIB BANK LTD",
+    "Askari-Bank-Logo.png":        "ASKARI BANK LTD",
+    "UBL-Bank-Logo.png":           "UNITED BANK LTD",
+    "Silk-Bank-Logo.png":          "SILK BANK LTD",
+    "soneri-bank-logo.png":        "SONERI BANK LTD",
+    "meezan-bank-logo.png":        "MEEZAN BANK LTD",
+    "mcb-logo.png":                "MCB BANK LTD",
+    "new-Jazzcash-logo.png":       "MOBILINK MF BANK",
+    "Dubai-Islamic-Bank-logo.png": "DUBAI ISLAMIC BANK",
+    "bank-islami-logo.png":        "BANK ISLAMI PAK.",
+    "ztbl-logo.png":               "ZARAI TARAQIATI BANK",
+    "al-baraka-logo.png":          "ALBARAKA BANK LTD",
+    "bank-al-habib-logo.png":      "BANK AL-HABIB LTD",
+    "faysal-bank-logo.png":        "FAYSAL BANK LTD",
+    "Raast-Logo.png":              None,
+    "psl-10-logo-2025.png":        None,
+}
+
+_LOGO_HIST_MIN_CORREL = 0.70   # minimum histogram correlation to accept a match
+_LOGO_MIN_COLORED_PX = 200    # reject region if fewer colored (non-white) pixels
+
+
+def _load_logo_bgr(path: Path) -> np.ndarray | None:
+    """Load a logo PNG, compositing alpha onto white, and return a BGR array."""
+    img = cv2.imread(str(path), cv2.IMREAD_UNCHANGED)
+    if img is None:
+        return None
+    if img.ndim == 2:
+        return cv2.cvtColor(img, cv2.COLOR_GRAY2BGR)
+    if img.shape[2] == 4:
+        b, g, r, a = cv2.split(img)
+        alpha = a.astype(np.float32) / 255.0
+        white = np.full_like(b, 255, dtype=np.float32)
+        def blend(ch: np.ndarray) -> np.ndarray:
+            return np.clip(ch.astype(np.float32) * alpha + white * (1 - alpha), 0, 255).astype(np.uint8)
+        return cv2.merge([blend(b), blend(g), blend(r)])
+    return img[:, :, :3]
+
+
+def _hsv_hist(bgr: np.ndarray) -> np.ndarray | None:
+    """Compute a normalised Hue+Saturation histogram, ignoring near-white pixels."""
+    hsv = cv2.cvtColor(bgr, cv2.COLOR_BGR2HSV)
+    # Mask: keep pixels that are not near-white (low-saturation + high-value)
+    mask = np.where((hsv[:, :, 1].astype(int) >= 30) | (hsv[:, :, 2].astype(int) <= 200), 1, 0).astype(np.uint8)
+    if int(mask.sum()) < _LOGO_MIN_COLORED_PX:
+        return None
+    h_hist = cv2.calcHist([hsv], [0], mask, [18], [0, 180])   # 18 hue bins
+    s_hist = cv2.calcHist([hsv], [1], mask, [8],  [0, 256])   # 8 saturation bins
+    hist = np.concatenate([h_hist.flatten(), s_hist.flatten()]).astype(np.float32)
+    cv2.normalize(hist, hist)
+    return hist
+
+
+def _load_logo_histograms() -> dict[str, np.ndarray]:
+    """Pre-compute HSV histograms for every reference bank logo at startup."""
+    out: dict[str, np.ndarray] = {}
+    for filename, bank_name in _LOGO_BANK_MAP.items():
+        if bank_name is None or bank_name in out:
+            continue
+        path = _BANK_LOGO_DIR / filename
+        bgr = _load_logo_bgr(path)
+        if bgr is None:
+            continue
+        hist = _hsv_hist(bgr)
+        if hist is not None:
+            out[bank_name] = hist
+    return out
+
+
+_LOGO_HISTOGRAMS: dict[str, np.ndarray] = _load_logo_histograms()
+
+
+def _detect_bank_from_logo(image: Image.Image) -> str | None:
+    """Return the bank whose logo color signature best matches *image*'s top-left region."""
+    if not _LOGO_HISTOGRAMS:
+        return None
+
+    w, h = image.size
+    # Logos live in the top-left quadrant of a landscape cheque
+    region = image.crop((0, 0, int(w * 0.45), int(h * 0.45)))
+    bgr = cv2.cvtColor(np.array(region), cv2.COLOR_RGB2BGR)
+    query_hist = _hsv_hist(bgr)
+    if query_hist is None:
+        return None
+
+    best_bank: str | None = None
+    best_score = -1.0
+
+    for bank_name, ref_hist in _LOGO_HISTOGRAMS.items():
+        score = float(cv2.compareHist(query_hist, ref_hist, cv2.HISTCMP_CORREL))
+        if score > best_score:
+            best_score = score
+            best_bank = bank_name
+
+    return best_bank if best_score >= _LOGO_HIST_MIN_CORREL else None
+
 # Pakistani MICR currency codes (last 3 digits of MICR line)
 MICR_CURRENCY: dict[str, str] = {
     "000": "Rupee",
@@ -174,9 +281,33 @@ def _rotation_score(results: list, image_height: int) -> int:
     return score
 
 
+_MAX_OCR_DIM = 1600   # resize before OCR to cap processing time
+_EARLY_EXIT_SCORE = 180  # skip remaining rotations if first attempt scores this well
+
+
+def _resize_for_ocr(img: Image.Image) -> Image.Image:
+    w, h = img.size
+    if max(w, h) <= _MAX_OCR_DIM:
+        return img
+    scale = _MAX_OCR_DIM / max(w, h)
+    return img.resize((int(w * scale), int(h * scale)), Image.LANCZOS)
+
+
 def _best_rotation(image: Image.Image) -> tuple[Image.Image, list]:
+    image = _resize_for_ocr(image)
+    w, h = image.size
+
+    # Narrow the candidate angles using aspect ratio — cheques are almost always landscape
+    if w >= h * 1.25:
+        angles = (0, 180)
+    elif h >= w * 1.25:
+        angles = (90, 270)
+    else:
+        angles = (0, 90, 180, 270)
+
     best_img, best_results, best_score = image, [], -1
-    for angle in (0, 90, 180, 270):
+
+    for angle in angles:
         rotated = image.rotate(angle, expand=True)
         results = _ocr_with_boxes(rotated)
         score = _rotation_score(results, rotated.size[1])
@@ -184,6 +315,9 @@ def _best_rotation(image: Image.Image) -> tuple[Image.Image, list]:
             best_score = score
             best_img = rotated
             best_results = results
+        if best_score >= _EARLY_EXIT_SCORE:
+            break  # confident enough — skip remaining rotations
+
     return best_img, best_results
 
 
@@ -699,7 +833,10 @@ async def analyze_cheque(file: UploadFile = File(...)) -> dict:
 
     bank_code           = micr["micr_issuer_bank"]
     bank_name_from_code = PAKISTANI_BANKS.get(bank_code) if bank_code else None
-    logo_bank           = _detect_bank_from_text(full_text)
+    logo_bank_text      = _detect_bank_from_text(full_text)
+    logo_bank_visual    = _detect_bank_from_logo(rotated)
+    # Prefer text detection; fall back to visual logo match
+    logo_bank           = logo_bank_text or logo_bank_visual
     currency_code       = micr.get("micr_currency")
     currency_name       = MICR_CURRENCY.get(currency_code) if currency_code else None
 
@@ -718,10 +855,12 @@ async def analyze_cheque(file: UploadFile = File(...)) -> dict:
 
     return {
         # Validation summary
-        "is_cheque":   is_cheque,
-        "confidence":  confidence,
-        "is_match":    is_match,
-        "logo_bank":   logo_bank,
+        "is_cheque":        is_cheque,
+        "confidence":       confidence,
+        "is_match":         is_match,
+        "logo_bank":        logo_bank,
+        "logo_bank_text":   logo_bank_text,
+        "logo_bank_visual": logo_bank_visual,
         # MICR fields
         "micr_cheque_number":         micr["micr_cheque_number"],
         "micr_issuer_bank":           bank_code,

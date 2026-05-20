@@ -11,7 +11,16 @@
       "PowerShell(python -m uvicorn --version 2>&1)",
       "PowerShell(python -c \"import uvicorn; print\\('uvicorn ready'\\)\" 2>&1)",
       "PowerShell(python -c \"import uvicorn; print\\('ok'\\)\" 2>&1)",
-      "PowerShell(Start-Sleep -Seconds 8; \\(Invoke-WebRequest -Uri \"http://localhost:8000/\" -UseBasicParsing -TimeoutSec 5\\).StatusCode)"
+      "PowerShell(Start-Sleep -Seconds 8; \\(Invoke-WebRequest -Uri \"http://localhost:8000/\" -UseBasicParsing -TimeoutSec 5\\).StatusCode)",
+      "Bash(pip install *)",
+      "Bash(python -c \"import main; print\\('Logo descriptors loaded:', list\\(main._LOGO_DESCRIPTORS.keys\\(\\)\\)\\)\")",
+      "Bash(python -c ' *)",
+      "Bash(python -c \"import main; print\\('Loaded banks:', list\\(main._LOGO_DESCRIPTORS.keys\\(\\)\\)\\)\")",
+      "Bash(uvicorn main:app --host 127.0.0.1 --port 8000 --reload)",
+      "Bash(curl -s http://127.0.0.1:8000/)",
+      "Bash(python -m uvicorn main:app --host 127.0.0.1 --port 8000)",
+      "Bash(curl -s -o /dev/null -w \"%{http_code}\" http://127.0.0.1:8000/)",
+      "PowerShell(Get-NetTCPConnection -LocalPort 8000 -ErrorAction SilentlyContinue | Select-Object -ExpandProperty OwningProcess | Sort-Object -Unique | ForEach-Object { Stop-Process -Id $_ -Force -ErrorAction SilentlyContinue; Write-Host \"Killed PID $_\" })"
     ]
   }
 }
